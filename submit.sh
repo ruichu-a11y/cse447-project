@@ -6,7 +6,8 @@ rm -rf submit submit.zip
 mkdir -p submit
 
 # submit team.txt
-printf "Rui Chu,ruichu\nJackson Kent,jtkent\nSanta Claus,sclaus" > submit/team.txt
+# Unable to contact our third member, Rong Fang
+printf "Rui Chu,ruichu\nJackson Kent,jtkent\n" > submit/team.txt
 
 # train model
 python src/myprogram.py train --work_dir work
