@@ -115,7 +115,7 @@ class MyModel:
         # Honestly if loading data fails it's fine if we crash, so
         # we won't worry about error handling and just hope that everything actually works
         data = []
-        with open(fname) as f:
+        with open(fname, errors="replace") as f:
             for line in f:
                 data.append(line.strip())
         return data
@@ -124,7 +124,7 @@ class MyModel:
     def load_test_data(cls, fname):
         # Same as trainig data
         data = []
-        with open(fname) as f:
+        with open(fname, errors="replace") as f:
             for line in f:
                 data.append(line.strip())
         return data
@@ -135,7 +135,8 @@ class MyModel:
             for p in preds:
                 f.write('{}\n'.format(p))
 
-    def run_train(self, data, work_dir, verbose=False):
+    def run_train(self, data, work_dir, verbose=True):
+        print("running train")
         # First we need to build our vocab
         vocab_size = self.build_vocab(data)
 
@@ -150,7 +151,10 @@ class MyModel:
 
         # Note for later: we'll figure out moving the model to GPU at some point,
         # but for now CPU is fine to make sure we have something working
-        # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Using device: {device}")
+        print(torch.version.cuda)
+        self.model.to(device)
 
         # We'll use CE loss since we are doing multiclass classification,
         # and Adam because they wouldn't let me use it in 446 (and also it's a fine default)
@@ -158,7 +162,7 @@ class MyModel:
         optimizer = optim.Adam(self.model.parameters(), lr=0.001)  # more magic!
 
         # Now for the main training loop! We'll cast our last spell and use 50 as the epoch number for now
-        for epoch in range(50):
+        for epoch in range(1):
             epoch_loss = 0.0
             self.model.train()  # Still not super familiar with torch, but it cant hurt to have the model in train mode for training
             # We'll go through each batch and do our typical ML routine
@@ -166,8 +170,8 @@ class MyModel:
                 X, Y = batch  # context is (batch_size, n) and target is (batch_size)
 
                 # I think we may have to move these to GPU?
-                # X = X.to(device)
-                # Y = Y.to(device)
+                X = X.to(device)
+                Y = Y.to(device)
 
                 # Zero the gradients from the last step
                 optimizer.zero_grad()
@@ -256,6 +260,7 @@ class MyModel:
 
 
 if __name__ == '__main__':
+    print("running main")
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('mode', choices=('train', 'test'), help='what to run')
     parser.add_argument('--work_dir', help='where to save', default='work')
@@ -272,7 +277,8 @@ if __name__ == '__main__':
         print('Instatiating model')
         model = MyModel()
         print('Loading training data')
-        train_data = MyModel.load_training_data()
+       # train_path = os.path.join("/job/data", "train.txt")
+        train_data = MyModel.load_training_data("data/train.txt")
         print('Training')
         model.run_train(train_data, args.work_dir)
         print('Saving model')
