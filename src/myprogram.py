@@ -88,6 +88,7 @@ class MyModel:
         self.model = None
         self.char_to_idx = None
         self.idx_to_char = None
+        self.vocab_size = None
     
     # We'll need a function to build our vocab just like in A1
     def build_vocab(self, data):
@@ -108,6 +109,7 @@ class MyModel:
             self.idx_to_char[i + 1] = c
         
         # All done! We'll return the vocab size for convenience
+        self.vocab_size = len(self.char_to_idx)
         return len(self.char_to_idx)
 
     @classmethod
@@ -136,7 +138,6 @@ class MyModel:
                 f.write('{}\n'.format(p))
 
     def run_train(self, data, work_dir, verbose=True):
-        print("running train")
         # First we need to build our vocab
         vocab_size = self.build_vocab(data)
 
@@ -152,8 +153,6 @@ class MyModel:
         # Note for later: we'll figure out moving the model to GPU at some point,
         # but for now CPU is fine to make sure we have something working
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"Using device: {device}")
-        print(torch.version.cuda)
         self.model.to(device)
 
         # We'll use CE loss since we are doing multiclass classification,
@@ -161,7 +160,8 @@ class MyModel:
         ce_loss= nn.CrossEntropyLoss()
         optimizer = optim.Adam(self.model.parameters(), lr=0.001)  # more magic!
 
-        # Now for the main training loop! We'll cast our last spell and use 50 as the epoch number for now
+        # Now for the main training loop! We'll cast our last spell and use 1 as the epoch number for now
+        # (obviously that's a little low, but we're just getting things up and running for now)
         for epoch in range(1):
             epoch_loss = 0.0
             self.model.train()  # Still not super familiar with torch, but it cant hurt to have the model in train mode for training
@@ -237,26 +237,42 @@ class MyModel:
     def save(self, work_dir):
         # your code here
         # this particular model has nothing to save, but for demonstration purposes we will save a blank file
-        torch.save(self.model, "model.pt")
-        
-        '''
+        # torch.save(self.model.state_dict(), os.path.join(work_dir, "model.pt"))
+        os.makedirs(work_dir, exist_ok=True)
         save_path = os.path.join(work_dir, "model.pt")
+        torch.save(
+            {
+                "model_state_dict": self.model.state_dict(),
+                "n": self.n,
+                "vocab_size": self.vocab_size,
+                "char_to_idx": self.char_to_idx,
+                "idx_to_char": self.idx_to_char,
+                # optional but nice:
+                "embedding_dim": 16,
+                "hidden_dim": 128,
+            },
+            save_path
+        )
 
-        torch.save({
-            "model_state_dict": self.model.state_dict(),
-            "char_to_idx": self.char_to_idx,
-            "idx_to_char": self.idx_to_char,
-            "n": self.n,
-            "embedding_dim": self.embedding_dim,
-            "hidden_dim": self.hidden_dim
-        }, save_path)
-        '''
 
     @classmethod
     def load(cls, work_dir):
-        # your code here
-        # this particular model has nothing to load, but for demonstration purposes we will load a blank file
-        model = torch.load("model.pt")
+        ckpt_path = os.path.join(work_dir, "model.pt")
+        checkpoint = torch.load(ckpt_path, map_location="cpu")
+
+        instance = cls(n=checkpoint["n"])
+        instance.vocab_size = checkpoint["vocab_size"]
+        instance.char_to_idx = checkpoint["char_to_idx"]
+        instance.idx_to_char = checkpoint["idx_to_char"]
+
+        emb = checkpoint.get("embedding_dim", 16)
+        hid = checkpoint.get("hidden_dim", 128)
+
+        instance.model = NgramModel(instance.vocab_size, emb, hid, instance.n)
+        instance.model.load_state_dict(checkpoint["model_state_dict"])
+        instance.model.eval()
+
+        return instance
 
 
 if __name__ == '__main__':
