@@ -135,33 +135,124 @@ class MyModel:
             for p in preds:
                 f.write('{}\n'.format(p))
 
-    def run_train(self, data, work_dir):
-        # your code here
-        pass
+    def run_train(self, data, work_dir, verbose=False):
+        # First we need to build our vocab
+        vocab_size = self.build_vocab(data)
+
+        # Now we can make our model!
+        # We're using arbitrary magic numbers for now, but we'll do a hyperparam search later
+        self.model = NgramModel(vocab_size, 16, 128, self.n)
+
+        # Now we need to make our dataset and dataloader
+        dataset = NgramDataset(data, self.n, self.char_to_idx)
+        # Another magic number for batch size that we'll tune later
+        dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
+
+        # Note for later: we'll figure out moving the model to GPU at some point,
+        # but for now CPU is fine to make sure we have something working
+        # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # We'll use CE loss since we are doing multiclass classification,
+        # and Adam because they wouldn't let me use it in 446 (and also it's a fine default)
+        ce_loss= nn.CrossEntropyLoss()
+        optimizer = optim.Adam(self.model.parameters(), lr=0.001)  # more magic!
+
+        # Now for the main training loop! We'll cast our last spell and use 50 as the epoch number for now
+        for epoch in range(50):
+            epoch_loss = 0.0
+            self.model.train()  # Still not super familiar with torch, but it cant hurt to have the model in train mode for training
+            # We'll go through each batch and do our typical ML routine
+            for batch in dataloader:
+                X, Y = batch  # context is (batch_size, n) and target is (batch_size)
+
+                # I think we may have to move these to GPU?
+                # X = X.to(device)
+                # Y = Y.to(device)
+
+                # Zero the gradients from the last step
+                optimizer.zero_grad()
+
+                # Forward pass to get predictions
+                output = self.model(X)  # output is (batch_size, vocab_size)
+
+                # Compute loss
+                loss = ce_loss(output, Y)
+                # Backward pass to compute gradients
+                loss.backward()
+
+                # Let adam update weights
+                optimizer.step()
+
+                epoch_loss += loss.item()
+            
+            # We'll print the loss for this epoch to see how we're doing
+            if verbose:
+                epoch_loss /= len(dataloader)  # average loss per batch
+                print(f"Loss for epoch {epoch + 1}: {epoch_loss:.4f}")
+
 
     def run_pred(self, data):
-        # your code here
         preds = []
-        all_chars = string.ascii_letters
+        self.model.eval()  # Same as train, but for... well, evaluation
+        default_idx = self.char_to_idx.get('<unk>')  # for readability later
+
+        # This loop structure should work fine
         for inp in data:
-            # this model just predicts a random character each time
-            top_guesses = [random.choice(all_chars) for _ in range(3)]
-            preds.append(''.join(top_guesses))
+            if inp is None:
+                inp = ""
+            # First, we want to grab the last n characters of the input for our context
+            context = inp[-self.n:]
+            # Now let's make sure we have enough characters and pad with <unk> if we don't
+            if len(context) < self.n:
+                context = '<unk>' * (self.n - len(context)) + context  # Python string math is always so weird
+            
+            # Now we need to convert the context to indices
+            context_indices = [self.char_to_idx.get(c, default_idx) for c in context]
+            # And convert them to a tensor
+            context_tensor = torch.tensor([context_indices], dtype=torch.long)  # (1, n)
+
+            with torch.no_grad():  # we don't need gradients for prediction
+                output = self.model(context_tensor)
+                # Softmax will convert the output to actual probabilities
+                probs = torch.softmax(output, dim=1)
+
+                # Now we want to get the top 3 most likely next characters
+                _, indices = torch.topk(probs, k=3)
+
+                # Then we just convert the indices to the characters and concatenate them into a string
+                indices = indices.squeeze(0).tolist()
+                pred_chars = [self.idx_to_char[idx] for idx in indices]
+
+                # We'll replace any unknown characters with a space for readability
+                pred_chars = [c if c != '<unk>' else ' ' for c in pred_chars]
+                
+                preds.append(''.join(pred_chars))  # join the list of chars into a string
+
         return preds
 
     def save(self, work_dir):
         # your code here
         # this particular model has nothing to save, but for demonstration purposes we will save a blank file
-        with open(os.path.join(work_dir, 'model.checkpoint'), 'wt') as f:
-            f.write('dummy save')
+        torch.save(self.model, "model.pt")
+        
+        '''
+        save_path = os.path.join(work_dir, "model.pt")
+
+        torch.save({
+            "model_state_dict": self.model.state_dict(),
+            "char_to_idx": self.char_to_idx,
+            "idx_to_char": self.idx_to_char,
+            "n": self.n,
+            "embedding_dim": self.embedding_dim,
+            "hidden_dim": self.hidden_dim
+        }, save_path)
+        '''
 
     @classmethod
     def load(cls, work_dir):
         # your code here
         # this particular model has nothing to load, but for demonstration purposes we will load a blank file
-        with open(os.path.join(work_dir, 'model.checkpoint')) as f:
-            dummy_save = f.read()
-        return MyModel()
+        model = torch.load("model.pt")
 
 
 if __name__ == '__main__':
