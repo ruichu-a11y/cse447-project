@@ -57,6 +57,12 @@ class NgramModel(nn.Module):
 
         self.relu = nn.ReLU()  # we want to add nonlinearity to ensure we can capture complex patterns
 
+        # We'll add a second layer for more complexity
+        self.hdn_layer2 = nn.Linear(hidden_dim, hidden_dim)
+
+        # And one more activation
+        self.relu2 = nn.ReLU()
+
         # We will apply a softmax to the output of this layer to get probabilities
         self.out_layer = nn.Linear(hidden_dim, vocab_size)
 
@@ -69,15 +75,15 @@ class NgramModel(nn.Module):
         embeds = embeds.view(embeds.size(0), -1)  # (batch_size, n * embedding_dim)
 
         # Pass through the hidden layer and apply ReLU
-        out = torch.relu(self.hdn_layer(embeds))  # (batch_size, hidden_dim)
+        out = self.relu(self.hdn_layer(embeds))  # (batch_size, hidden_dim)
+
+        # Now the second hidden layer and ReLU
+        out = self.relu2(self.hdn_layer2(out))  # (batch_size, hidden_dim)
 
         # Now the last linear layer!
         out = self.out_layer(out)  # (batch_size, vocab_size)
         return out
 
-# As a note for any human graders, we haven't started on the implementation yet,
-# but this code currently runs without errors, so we are leaving it as is for this
-# submission, as we will begin work this week.
 class MyModel:
     """
     Might make this comment more descriptive later, but for now, this model uses a
@@ -132,33 +138,128 @@ class MyModel:
         return data
 
     @classmethod
+    def make_train_val_split(cls, data, val_frac=0.1):
+        # We'll shuffle the data and then split it into training and validation sets
+        random.shuffle(data)
+        val_size = int(len(data) * val_frac)
+        val_data = data[:val_size]
+        train_data = data[val_size:]
+        return train_data, val_data
+
+    @classmethod
     def write_pred(cls, preds, fname):
         with open(fname, 'wt') as f:
             for p in preds:
                 f.write('{}\n'.format(p))
 
-    def run_train(self, data, work_dir, verbose=True):
-        # First we need to build our vocab
-        vocab_size = self.build_vocab(data)
+    def hyperparam_search(self, train_dataset, val_dataset, num_trials=10):
+        # We'll do a random search for hyperparameters
+        # Specifically, we'll find embedding_dim and hidden_dim, as well as
+        # learning rate and batch size.
+        best_params = {}
 
-        # Now we can make our model!
-        # We're using arbitrary magic numbers for now, but we'll do a hyperparam search later
-        self.model = NgramModel(vocab_size, 16, 128, self.n)
+        val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)  # fixed batch size for validation
+        
+        # We'll try num_trials random combinations of hyperparameters and see which one works best
+        # First, we'll set up our search ranges
+        hidden_range = (3, 10)  # hidden_dim will be 2^x for x in this range
+        embedding_range = (3, 10)  # embedding_dim will be 2^x for x in this range
+        lr_range = (-5, -1)  # learning rate will be 10^x for x in this range
+        batch_range = (5, 10)  # batch size will be 2^x for x in this range
+  
+        # We'll choose the best set based on loss after a few epochs
+        best_loss = float('inf')
+
+        DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Now we'll search!
+        for trial in range(num_trials):
+            print(f"Trial {trial + 1}/{num_trials}")
+            # Let's choose random hyperparameters
+            hidden_dim = 2 ** random.randint(*hidden_range)
+            embedding_dim = 2 ** random.randint(*embedding_range)
+            lr = 10 ** random.uniform(*lr_range)
+            batch_size = 2 ** random.randint(*batch_range)
+
+            # Now for our loader
+            loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+            # Now we'll set up a model with these hyperparameters and train it for a few epochs to see how it does
+            model = NgramModel(self.vocab_size, embedding_dim, hidden_dim, self.n)
+            model.to(DEVICE)
+            loss_fn = nn.CrossEntropyLoss()
+            optimizer = optim.Adam(model.parameters(), lr=lr)
+
+            epoch_losses = []
+            for epoch in range(10):
+                model.train()
+                for batch in loader:
+                    X, Y = batch
+                    X = X.to(DEVICE)
+                    Y = Y.to(DEVICE)
+
+                    # Typical training loop: zero gradients, forward pass, compute loss, backward pass, optimizer step
+                    optimizer.zero_grad()
+                    output = model(X)
+                    loss = loss_fn(output, Y)
+                    loss.backward()
+                    optimizer.step()
+
+                # Now we get our validation loss
+                model.eval()
+                with torch.no_grad():
+                    val_loss = 0.0
+                    for val_batch in val_loader:
+                        X_val, Y_val = val_batch
+                        X_val = X_val.to(DEVICE)
+                        Y_val = Y_val.to(DEVICE)
+                        output_val = model(X_val)
+                        val_loss += loss_fn(output_val, Y_val).item()
+                    epoch_losses.append(val_loss / len(val_loader))  # average validation loss for this epoch
+                model.train()
+                
+            # Now we can check for the best loss
+            min_loss = min(epoch_losses)  # Use the minimum epoch loss
+            if min_loss < best_loss:
+                best_loss = min_loss
+                best_params = {
+                    'hidden_dim': hidden_dim,
+                    'embedding_dim': embedding_dim,
+                    'lr': lr,
+                    'batch_size': batch_size
+                }
+
+        return best_params
+
+
+    def run_train(self, train_data, val_data, work_dir, verbose=True):
+        # First we need to build our vocab
+        vocab_size = self.build_vocab(train_data)
 
         # Now we need to make our dataset and dataloader
-        dataset = NgramDataset(data, self.n, self.char_to_idx)
-        # Another magic number for batch size that we'll tune later
-        dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
+        train_dataset = NgramDataset(train_data, self.n, self.char_to_idx)
+        val_dataset = NgramDataset(val_data, self.n, self.char_to_idx)
 
         # Note for later: we'll figure out moving the model to GPU at some point,
         # but for now CPU is fine to make sure we have something working
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model.to(device)
 
+        # Before we start training for real, we'll do a search for the best hyperparameters
+        # with a random search
+        best_params = self.hyperparam_search(train_dataset, val_dataset, num_trials=2)
+
         # We'll use CE loss since we are doing multiclass classification,
         # and Adam because they wouldn't let me use it in 446 (and also it's a fine default)
         ce_loss= nn.CrossEntropyLoss()
-        optimizer = optim.Adam(self.model.parameters(), lr=0.001)  # more magic!
+        optimizer = optim.Adam(self.model.parameters(), lr=best_params['lr'])
+
+        # Now we can set up our dataloader with the best batch size
+        dataloader = DataLoader(train_dataset, batch_size=best_params['batch_size'], shuffle=True)
+
+        # Now we can make our model!
+        # We're using arbitrary magic numbers for now, but we'll do a hyperparam search later
+        self.model = NgramModel(vocab_size, best_params['embedding_dim'], best_params['hidden_dim'], self.n)
 
         # Now for the main training loop! We'll cast our last spell and use 1 as the epoch number for now
         # (obviously that's a little low, but we're just getting things up and running for now)
@@ -294,9 +395,10 @@ if __name__ == '__main__':
         model = MyModel()
         print('Loading training data')
        # train_path = os.path.join("/job/data", "train.txt")
-        train_data = MyModel.load_training_data("data/train.txt")
+        training_data = MyModel.load_training_data("data/train.txt")
+        train_data, val_data = MyModel.make_train_val_split(training_data)
         print('Training')
-        model.run_train(train_data, args.work_dir)
+        model.run_train(train_data, val_data, args.work_dir)
         print('Saving model')
         model.save(args.work_dir)
     elif args.mode == 'test':
