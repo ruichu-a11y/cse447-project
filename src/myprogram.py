@@ -171,6 +171,7 @@ class MyModel:
         best_loss = float('inf')
 
         DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(DEVICE)
 
         # Now we'll search!
         for trial in range(num_trials):
@@ -191,7 +192,8 @@ class MyModel:
             optimizer = optim.Adam(model.parameters(), lr=lr)
 
             epoch_losses = []
-            for epoch in range(10):
+            for epoch in range(5):
+                print(f"Epoch {epoch + 1}/5")
                 model.train()
                 for batch in loader:
                     X, Y = batch
@@ -229,6 +231,7 @@ class MyModel:
                     'batch_size': batch_size
                 }
 
+        print(best_params)
         return best_params
 
 
@@ -239,11 +242,6 @@ class MyModel:
         # Now we need to make our dataset and dataloader
         train_dataset = NgramDataset(train_data, self.n, self.char_to_idx)
         val_dataset = NgramDataset(val_data, self.n, self.char_to_idx)
-
-        # Note for later: we'll figure out moving the model to GPU at some point,
-        # but for now CPU is fine to make sure we have something working
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model.to(device)
 
         # Before we start training for real, we'll do a search for the best hyperparameters
         # with a random search
@@ -260,6 +258,11 @@ class MyModel:
         # Now we can make our model!
         # We're using arbitrary magic numbers for now, but we'll do a hyperparam search later
         self.model = NgramModel(vocab_size, best_params['embedding_dim'], best_params['hidden_dim'], self.n)
+
+        # Note for later: we'll figure out moving the model to GPU at some point,
+        # but for now CPU is fine to make sure we have something working
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.to(device)
 
         # Now for the main training loop! We'll cast our last spell and use 1 as the epoch number for now
         # (obviously that's a little low, but we're just getting things up and running for now)
