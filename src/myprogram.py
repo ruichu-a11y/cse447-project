@@ -5,7 +5,7 @@ import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 # This is a mix of things we remember from CSE 446 as well as
@@ -158,6 +158,14 @@ class MyModel:
         # learning rate and batch size.
         best_params = {}
 
+        num_samples = len(train_dataset)
+        num_subset_samples = int(0.1 * num_samples)
+
+        # Get a list of shuffled indices
+        indices = torch.randperm(num_samples).tolist()[:num_subset_samples]
+
+        # 3. Create the subset
+        subset_dataset = Subset(train_dataset, indices)
         val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)  # fixed batch size for validation
         
         # We'll try num_trials random combinations of hyperparameters and see which one works best
@@ -183,7 +191,7 @@ class MyModel:
             batch_size = 2 ** random.randint(*batch_range)
 
             # Now for our loader
-            loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            loader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=True)
 
             # Now we'll set up a model with these hyperparameters and train it for a few epochs to see how it does
             model = NgramModel(self.vocab_size, embedding_dim, hidden_dim, self.n)
@@ -247,17 +255,17 @@ class MyModel:
         # with a random search
         best_params = self.hyperparam_search(train_dataset, val_dataset, num_trials=2)
 
-        # We'll use CE loss since we are doing multiclass classification,
-        # and Adam because they wouldn't let me use it in 446 (and also it's a fine default)
-        ce_loss= nn.CrossEntropyLoss()
-        optimizer = optim.Adam(self.model.parameters(), lr=best_params['lr'])
-
         # Now we can set up our dataloader with the best batch size
         dataloader = DataLoader(train_dataset, batch_size=best_params['batch_size'], shuffle=True)
 
         # Now we can make our model!
         # We're using arbitrary magic numbers for now, but we'll do a hyperparam search later
         self.model = NgramModel(vocab_size, best_params['embedding_dim'], best_params['hidden_dim'], self.n)
+
+        # We'll use CE loss since we are doing multiclass classification,
+        # and Adam because they wouldn't let me use it in 446 (and also it's a fine default)
+        ce_loss= nn.CrossEntropyLoss()
+        optimizer = optim.Adam(self.model.parameters(), lr=best_params['lr'])
 
         # Note for later: we'll figure out moving the model to GPU at some point,
         # but for now CPU is fine to make sure we have something working
@@ -297,6 +305,8 @@ class MyModel:
             if verbose:
                 epoch_loss /= len(dataloader)  # average loss per batch
                 print(f"Loss for epoch {epoch + 1}: {epoch_loss:.4f}")
+
+        return best_params  # return the best hyperparameters for reference
 
 
     def run_pred(self, data):
@@ -338,7 +348,7 @@ class MyModel:
 
         return preds
 
-    def save(self, work_dir):
+    def save(self, work_dir, emb=16, hid=128):
         # your code here
         # this particular model has nothing to save, but for demonstration purposes we will save a blank file
         # torch.save(self.model.state_dict(), os.path.join(work_dir, "model.pt"))
@@ -351,16 +361,15 @@ class MyModel:
                 "vocab_size": self.vocab_size,
                 "char_to_idx": self.char_to_idx,
                 "idx_to_char": self.idx_to_char,
-                # optional but nice:
-                "embedding_dim": 16,
-                "hidden_dim": 128,
+                "embedding_dim": emb,
+                "hidden_dim": hid,
             },
             save_path
         )
 
 
     @classmethod
-    def load(cls, work_dir):
+    def load(cls, work_dir, emb=32, hid=512):
         ckpt_path = os.path.join(work_dir, "model.pt")
         checkpoint = torch.load(ckpt_path, map_location="cpu")
 
@@ -369,8 +378,8 @@ class MyModel:
         instance.char_to_idx = checkpoint["char_to_idx"]
         instance.idx_to_char = checkpoint["idx_to_char"]
 
-        emb = checkpoint.get("embedding_dim", 16)
-        hid = checkpoint.get("hidden_dim", 128)
+        emb = checkpoint.get("embedding_dim")
+        hid = checkpoint.get("hidden_dim")
 
         instance.model = NgramModel(instance.vocab_size, emb, hid, instance.n)
         instance.model.load_state_dict(checkpoint["model_state_dict"])
@@ -386,6 +395,8 @@ if __name__ == '__main__':
     parser.add_argument('--work_dir', help='where to save', default='work')
     parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
     parser.add_argument('--test_output', help='path to write test predictions', default='pred.txt')
+    #parser.add_argument('--emb', type=int, default=16, help='embedding dimension')
+    #parser.add_argument('--hid', type=int, default=128, help='hidden dimension')
     args = parser.parse_args()
 
     random.seed(0)
@@ -401,9 +412,9 @@ if __name__ == '__main__':
         training_data = MyModel.load_training_data("data/train.txt")
         train_data, val_data = MyModel.make_train_val_split(training_data)
         print('Training')
-        model.run_train(train_data, val_data, args.work_dir)
+        best_params = model.run_train(train_data, val_data, args.work_dir)
         print('Saving model')
-        model.save(args.work_dir)
+        model.save(args.work_dir, emb=best_params["embedding_dim"], hid=best_params["hidden_dim"])
     elif args.mode == 'test':
         print('Loading model')
         model = MyModel.load(args.work_dir)
