@@ -152,7 +152,7 @@ class MyModel:
             for p in preds:
                 f.write('{}\n'.format(p))
 
-    def hyperparam_search(self, train_dataset, val_dataset, num_trials=10):
+    def hyperparam_search(self, train_dataset, val_dataset, num_trials=15):
         # We'll do a random search for hyperparameters
         # Specifically, we'll find embedding_dim and hidden_dim, as well as
         # learning rate and batch size.
@@ -200,7 +200,7 @@ class MyModel:
             optimizer = optim.Adam(model.parameters(), lr=lr)
 
             epoch_losses = []
-            for epoch in range(5):
+            for epoch in range(8):
                 print(f"Epoch {epoch + 1}/5")
                 model.train()
                 for batch in loader:
@@ -274,7 +274,7 @@ class MyModel:
 
         # Now for the main training loop! We'll cast our last spell and use 1 as the epoch number for now
         # (obviously that's a little low, but we're just getting things up and running for now)
-        for epoch in range(1):
+        for epoch in range(20):
             epoch_loss = 0.0
             self.model.train()  # Still not super familiar with torch, but it cant hurt to have the model in train mode for training
             # We'll go through each batch and do our typical ML routine
